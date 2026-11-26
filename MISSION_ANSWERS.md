@@ -175,7 +175,35 @@ Kiểm tra thêm: `docker compose exec agent id` → `uid=999(appuser)`, xác nh
 
 ## Part 3: Cloud Deployment
 
-_(chưa làm — T6)_
+- **Nền tảng:** Render (Web Service chạy Docker, gói Free) + Render Key Value (Redis) cho rate limit/cost guard.
+- **Public URL:** https://k5-l3b-day14-lethanhha-2a202603901.onrender.com
+- **Cấu hình:** Root Directory `06-lab-complete`, Runtime Docker, Health Check Path `/health`. Biến môi trường (`AGENT_API_KEY`, `REDIS_URL`, `ENVIRONMENT`, `RATE_LIMIT_PER_MINUTE`, `DAILY_BUDGET_USD`) đặt trên Render dashboard, không ghi trong repo. `PORT` do Render cấp.
+
+Kết quả test thật trên URL công khai (`<KEY>` là API key đã che):
+
+```bash
+$ curl -i https://k5-l3b-day14-lethanhha-2a202603901.onrender.com/health
+HTTP/2 200
+{"status":"ok","uptime_seconds":410.7,"environment":"production"}
+
+$ curl -i https://k5-l3b-day14-lethanhha-2a202603901.onrender.com/ready
+HTTP/2 200
+{"ready":true}
+
+$ curl -i -X POST https://k5-l3b-day14-lethanhha-2a202603901.onrender.com/ask -H "Content-Type: application/json" -d '{"question":"Hi"}'
+HTTP/2 401
+{"detail":"Invalid or missing API key. Include header: X-API-Key: <your-key>"}
+
+$ curl -i -X POST https://k5-l3b-day14-lethanhha-2a202603901.onrender.com/ask -H "X-API-Key: sai" ...      -> HTTP/2 401
+
+$ curl -i -X POST https://k5-l3b-day14-lethanhha-2a202603901.onrender.com/ask -H "X-API-Key: <KEY>" -H "Content-Type: application/json" -d '{"question":"What is deployment?"}'
+HTTP/2 200
+{"question":"What is deployment?","answer":"Deployment là quá trình đưa code từ máy bạn lên server để người khác dùng được."}
+```
+
+Rate limit (RATE_LIMIT_PER_MINUTE=10) khi gọi liên tiếp 12 request với key đúng: `200 ×9, 429 ×3`, header `retry-after: 51` (đã có 1 request thành công trước đó trong cùng cửa sổ 60 giây, nên tổng 10 request được phép).
+
+Lưu ý: gói Free của Render "ngủ" khi không có request, lần gọi đầu sau khi ngủ có thể mất khoảng 50 giây.
 
 ## Part 4: API Security
 
@@ -380,7 +408,28 @@ Total messages: 10      (5 câu hỏi + 5 câu trả lời)
 
 ## Output `check_production_ready.py` (📋 Checklist Deliverable)
 
-_(chưa làm — T5c)_
+Chạy đầy đủ (kèm Docker) với `--public-url` của bản deploy Render:
+
+```
+=====
+  📋 Checklist Deliverable
+     ✅ Dockerfile (multi-stage, < 500 MB)
+     ✅ docker-compose.yml (agent + redis)
+     ✅ .dockerignore
+     ✅ Health check endpoint (GET /health)
+     ✅ Readiness endpoint (GET /ready)
+     ✅ API Key authentication
+     ✅ Rate limiting
+     ✅ Cost guard
+     ✅ Config từ environment variables
+     ✅ Structured logging
+     ✅ Graceful shutdown
+     ✅ Public URL ready (Railway / Render config)
+----------------------------------------------------------------
+  Result: 12/12 tiêu chí đạt · 44/44 checks passed
+  🎉 PASS 12/12 — PRODUCTION READY! Deploy nào!
+================================================================
+```
 
 ---
 
@@ -395,3 +444,4 @@ _(chưa làm — T5c)_
 | 5 | Viết giúp Part 6 bước T5a: `app/config.py`, `app/auth.py`, JsonFormatter + `/health` + middleware log + handler lỗi 500 trong `app/main.py`, `.env.example` | Code 4 file, giải thích từng quyết định (auto_error=False, compare_digest, propagate=False…) | Đã tự chạy `check_production_ready.py --static-only` và chạy server thật: /health 200; thiếu/sai key 401; đúng key 200; body sai 422; 10/10 dòng log là JSON hợp lệ. Cần đọc lại và tự giải thích từng file trước khi nộp. |
 | 6 | Viết giúp Part 6 bước T5b: `app/redis_client.py`, `rate_limiter.py` (Redis sorted set), `cost_guard.py` (incrbyfloat theo ngày), `/ready` và nối vào `/ask` | Code 3 file + sửa `main.py`, giải thích thuật toán và thứ tự xử lý | Đã chạy `check_production_ready.py --skip-docker`: tiêu chí 4–10 ✅, 11 ✅ phần chạy (Docker chưa kiểm tra). Cần đọc lại và tự giải thích trước khi nộp. |
 | 7 | Viết giúp Part 6 bước T5c: `Dockerfile` (multi-stage, slim, non-root, HEALTHCHECK, exec CMD), `docker-compose.yml`, `.dockerignore`, `railway.toml`, `render.yaml` | 5 file cấu hình và giải thích | Đã chạy đầy đủ `check_production_ready.py`: PASS 12/12 (43/43 checks) và thử `docker compose up` thật. Chưa deploy lên cloud. Cần đọc lại và tự giải thích trước khi nộp. |
+| 8 | Hỗ trợ Part 3 (deploy Render): hướng dẫn các bước, chạy các lệnh curl kiểm tra URL công khai, điền kết quả vào mục Part 3 và dán output của check_production_ready.py | Hướng dẫn cấu hình Render, bộ lệnh test, bản ghi kết quả (API key đã che) | Người dùng tự tạo service trên Render; mình chạy test thật trên URL và script chấm báo PASS 12/12 (44/44). Cần đọc lại trước khi nộp. |
