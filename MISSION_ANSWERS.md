@@ -7,7 +7,7 @@
 1. **API key và chuỗi kết nối database viết thẳng trong code** (dòng 17–18: `OPENAI_API_KEY = "sk-hardcoded-..."`, `DATABASE_URL = "postgresql://admin:password123@..."`). Push lên GitHub là lộ ngay, và muốn đổi key phải sửa code.
 2. **Không có quản lý cấu hình** (dòng 21–22: `DEBUG = True`, `MAX_TOKENS = 500` cố định). Không đổi được giữa dev/staging/production nếu không sửa code.
 3. **Dùng `print()` thay vì logging có cấu trúc** (dòng 33, 38). Không có level, không có thời gian, không phải JSON nên máy khó lọc/tìm.
-4. **In secret ra log** (dòng 34: `print(f"[DEBUG] Using key: {OPENAI_API_KEY}")`). Khi chạy thật, key nằm trong log của nền tảng, ai xem log cũng thấy. Đã xác nhận khi chạy: log in ra `Using key: sk-hardcoded-fake-key-never-do-this`.
+4. **In secret ra log** (dòng 34: `print(f"[DEBUG] Using key: {OPENAI_API_KEY}")`). Khi chạy thật, key nằm trong log của nền tảng, ai xem log cũng thấy. Đã xác nhận khi chạy: log in ra `Using key: sk-hardcoded-…(khóa giả của đề, đã rút gọn)`.
 5. **Không có health check** (dòng 42–43). Gọi `GET /health` trả 404 (đã kiểm tra), nên nền tảng cloud không biết agent còn sống hay đã treo để restart.
 6. **Port cố định 8000 và không đọc từ biến môi trường** (dòng 52: `port=8000`). Railway/Render cấp port qua biến `PORT`, nên app sẽ không nhận được traffic. Khi cổng 8000 bị chiếm thì không đổi port được nếu không sửa code (khác bản production chỉ cần đặt `PORT`).
 7. **`host="localhost"`** (dòng 51). Chỉ nhận kết nối từ chính máy; trong container sẽ không ai truy cập được từ bên ngoài (cần `0.0.0.0`).
@@ -204,6 +204,25 @@ HTTP/2 200
 Rate limit (RATE_LIMIT_PER_MINUTE=10) khi gọi liên tiếp 12 request với key đúng: `200 ×9, 429 ×3`, header `retry-after: 51` (đã có 1 request thành công trước đó trong cùng cửa sổ 60 giây, nên tổng 10 request được phép).
 
 Lưu ý: gói Free của Render "ngủ" khi không có request, lần gọi đầu sau khi ngủ có thể mất khoảng 50 giây.
+
+### So sánh `railway.toml` với `render.yaml` (nền tảng còn lại)
+
+Mình deploy thật lên **Render** (tạo Web Service và Key Value bằng dashboard). Railway mình **không deploy**, chỉ viết `railway.toml` và so sánh hai file cấu hình:
+
+| | `railway.toml` | `render.yaml` |
+|---|---|---|
+| Phạm vi | Chỉ cấu hình **một service**: cách build và kiểm tra sức khoẻ | **Blueprint** mô tả cả hệ thống: web service **và** Redis (`keyvalue`) cùng biến môi trường |
+| Build | `[build] builder = "DOCKERFILE"` | `runtime: docker`, `dockerfilePath` |
+| Health check | `[deploy] healthcheckPath = "/health"` (cộng timeout, chính sách restart) | `healthCheckPath: /health` |
+| Biến môi trường / secret | Không khai báo trong file; đặt ở tab Variables của dashboard | Khai báo ngay trong file: `generateValue: true` cho `AGENT_API_KEY` (Render tự sinh, không ghi giá trị), `fromService` nối `REDIS_URL` tới Redis |
+| Redis | Không tạo được từ file; phải thêm database trong dashboard rồi đặt `REDIS_URL` | Tạo luôn trong file (`type: keyvalue`) |
+| Port | Platform cấp biến `PORT`, Dockerfile đọc `${PORT:-8000}` | Giống vậy |
+
+Vì sao khác nhau: Render hướng tới "infrastructure as code" cho cả hệ thống (một file dựng lại được toàn bộ), còn `railway.toml` chỉ là cấu hình bổ sung cho một service, phần còn lại cấu hình qua dashboard. Với agent Part 6 (cần Redis), `render.yaml` gọn hơn vì khai báo được Redis và biến nối sẵn.
+
+### Exercise 3.3 — Cloud Run (`03-cloud-deployment/production-cloud-run/`)
+
+Mình chỉ đọc `cloudbuild.yaml` và `service.yaml`, không deploy (không cần tài khoản GCP). Pipeline CI/CD của `cloudbuild.yaml` chạy khi push lên `main`, gồm 4 bước tuần tự (mỗi bước `waitFor` bước trước): (1) **test**: cài dependencies và chạy `pytest tests/`; (2) **build**: `docker build` image, gắn tag theo `$COMMIT_SHA` và `latest`, dùng `--cache-from` để tận dụng cache; (3) **push** image lên Container Registry; (4) **deploy**: `gcloud run deploy` với min 1 / max 10 instance, 512Mi RAM, lấy `OPENAI_API_KEY` từ Secret Manager. Bước nào lỗi (ví dụ test fail) thì các bước sau không chạy, nên code lỗi không bao giờ được deploy. `service.yaml` là bản mô tả cùng service dưới dạng Knative (`gcloud run services replace`): `minScale/maxScale`, `containerConcurrency: 80`, tài nguyên và secret từ `secretKeyRef`, nên cấu hình có thể quản lý trong git.
 
 ## Part 4: API Security
 
@@ -445,3 +464,10 @@ Chạy đầy đủ (kèm Docker) với `--public-url` của bản deploy Render
 | 6 | Viết giúp Part 6 bước T5b: `app/redis_client.py`, `rate_limiter.py` (Redis sorted set), `cost_guard.py` (incrbyfloat theo ngày), `/ready` và nối vào `/ask` | Code 3 file + sửa `main.py`, giải thích thuật toán và thứ tự xử lý | Đã chạy `check_production_ready.py --skip-docker`: tiêu chí 4–10 ✅, 11 ✅ phần chạy (Docker chưa kiểm tra). Cần đọc lại và tự giải thích trước khi nộp. |
 | 7 | Viết giúp Part 6 bước T5c: `Dockerfile` (multi-stage, slim, non-root, HEALTHCHECK, exec CMD), `docker-compose.yml`, `.dockerignore`, `railway.toml`, `render.yaml` | 5 file cấu hình và giải thích | Đã chạy đầy đủ `check_production_ready.py`: PASS 12/12 (43/43 checks) và thử `docker compose up` thật. Chưa deploy lên cloud. Cần đọc lại và tự giải thích trước khi nộp. |
 | 8 | Hỗ trợ Part 3 (deploy Render): hướng dẫn các bước, chạy các lệnh curl kiểm tra URL công khai, điền kết quả vào mục Part 3 và dán output của check_production_ready.py | Hướng dẫn cấu hình Render, bộ lệnh test, bản ghi kết quả (API key đã che) | Người dùng tự tạo service trên Render; mình chạy test thật trên URL và script chấm báo PASS 12/12 (44/44). Cần đọc lại trước khi nộp. |
+| 9 | Làm T7a: thêm Histogram `agent_question_length_chars` vào `develop/app.py`, chạy v1/v2, 7 lần load test, điền mục 1, 2.1, 2.2 và phụ lục 7.1 của `BENCHMARK_REPORT.md` | Code 2 dòng + số đo + nhận xét | Số liệu lấy trực tiếp từ 7 file JSON trong `develop/reports/`. Phần giải thích RPS giảm ở concurrency 100 là suy luận, chưa đo riêng. Cần đọc lại và tự giải thích trước khi nộp. |
+| 10 | Làm T7b: chạy eval v1/v2, đọc 2 câu sai, thêm 2 tài liệu vào `KNOWLEDGE_BASE` trong `develop/utils/mock_llm.py`, chạy lại eval với quality gate 100%, điền mục 3 của `BENCHMARK_REPORT.md` | Code (2 mục KB), số đo, nhận xét trade-off | Số liệu từ `eval_v1/v2/v2_fixed.json`: 4.3% → 91.3% → 100%, 0 regression. Cần đọc lại và tự giải thích trước khi nộp. |
+| 11 | Làm T8a: dựng stack observability bằng docker compose, sửa lỗi Dockerfile (thêm `PYTHONUSERBASE`), bật tải Locust, truy vấn Prometheus để trả lời 4 câu Exercise 7.4 | Lệnh, 1 dòng sửa Dockerfile, câu trả lời mục 4.0 | Số liệu lấy từ Prometheus API khi tải đang chạy. Ảnh Grafana do người dùng tự chụp. Cần đọc lại và tự giải thích trước khi nộp. |
+| 12 | Làm T8b: dùng log + Jaeger API tìm trace chậm nhất và trace lỗi, đọc span, ghép với log JSON theo trace_id, điền mục 4.3 | Số liệu span, trace_id, dòng log | Dữ liệu lấy từ Jaeger API và log thật. Ảnh Jaeger do người dùng tự chụp. Cần đọc lại và tự giải thích trước khi nộp. |
+| 13 | Làm T8c: chạy promtool test, đổi MOCK_ERROR_RATE=0.2 và `docker pause` một agent, ghi giờ đổi/giờ alert firing, điền bảng 4.2 | Lệnh, số liệu thời gian, ghi chú giới hạn | Giờ lấy từ Prometheus API (activeAt) và log script. Chỉ làm 2 thí nghiệm (A, D); B, C, E chưa làm; thí nghiệm C không sạch vì cost alert đã firing sẵn. Ảnh alert do người dùng tự chụp. Cần đọc lại trước khi nộp. |
+| 14 | Làm T8d: dọn thí nghiệm (unpause, xoá .env, tạo lại agent về cấu hình mặc định), chạy Locust headless với 1 và 3 instance, điền mục 5 và 6 | Lệnh, bảng số từ CSV, phân tích nút thắt | Số liệu lấy từ scale_1/scale_3_stats.csv. Phân tích 'nút thắt là LLM' dựa trên trace và số đo, phần giới hạn do Locust là suy luận. Cần đọc lại và tự giải thích trước khi nộp. |
+| 15 | Làm T9 với lab-submit-check: đối chiếu SUBMISSION/RUBRIC, đổi tên 2 ảnh `jaegar-*` thành `jaeger-*`, copy JSON/CSV ra `reports/` và `benchmark-results/`, viết `DEPLOYMENT.md`, bổ sung phần so sánh railway/render và Cloud Run (Exercise 3.3) vào Part 3, tick mục 4.1, viết câu trả lời thí nghiệm E | Các file, đoạn giải thích, báo cáo kiểm tra | Câu trả lời thí nghiệm E dựa trên số eval ở mục 3 (chưa chạy thí nghiệm E). Đã so số `BENCHMARK_REPORT.md` với JSON/CSV: khớp. Cần đọc lại và tự giải thích trước khi nộp. |

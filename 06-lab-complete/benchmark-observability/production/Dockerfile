@@ -27,6 +27,8 @@ USER agent
 
 ENV PATH=/home/agent/.local/bin:$PATH
 ENV PYTHONPATH=/app
+# useradd -d /app nên HOME=/app → Python tìm user-site ở /app/.local; trỏ lại nơi thư viện thật sự nằm
+ENV PYTHONUSERBASE=/home/agent/.local
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
