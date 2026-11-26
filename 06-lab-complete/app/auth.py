@@ -23,7 +23,10 @@ def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
     expected = settings.agent_api_key
     # Thiếu header, hoặc server chưa cấu hình key (rỗng), hoặc key không khớp → 401.
     # compare_digest so sánh theo thời gian không đổi, tránh lộ key qua chênh lệch thời gian.
-    if not api_key or not expected or not secrets.compare_digest(api_key, expected):
+    # So sánh trên bytes (utf-8): compare_digest với str chứa ký tự không phải ASCII (vd "dán")
+    # sẽ ném TypeError → 500. So bytes thì key lạ chỉ đơn giản là không khớp → 401.
+    if (not api_key or not expected
+            or not secrets.compare_digest(api_key.encode("utf-8"), expected.encode("utf-8"))):
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing API key. Include header: X-API-Key: <your-key>",
